@@ -1,0 +1,99 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Cléa CI : généré et maintenu par Cléa (Paramètres → GitHub → CI obligatoire).
+# La branche main est protégée : une PR ne peut être mergée que si ce
+# check (« Cléa CI ») est vert ET que la branche est à jour (rebuild obligatoire).
+# Ne renomme pas le job « Cléa CI » : c'est le check exigé par la protection.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Cléa CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clea-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Cléa CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Détection de la pile technique
+        id: stack
+        run: |
+          if [ -f package.json ]; then echo "node=true" >> "$GITHUB_OUTPUT"; fi
+          if [ -f pnpm-lock.yaml ]; then echo "pm=pnpm" >> "$GITHUB_OUTPUT"
+          elif [ -f yarn.lock ]; then echo "pm=yarn" >> "$GITHUB_OUTPUT"
+          else echo "pm=npm" >> "$GITHUB_OUTPUT"; fi
+          if [ -f requirements.txt ] || [ -f pyproject.toml ]; then echo "python=true" >> "$GITHUB_OUTPUT"; fi
+          if [ -f go.mod ]; then echo "go=true" >> "$GITHUB_OUTPUT"; fi
+          if [ -f Cargo.toml ]; then echo "rust=true" >> "$GITHUB_OUTPUT"; fi
+
+      # ── Node.js (npm / pnpm / yarn) : lint, typecheck, test, build s'ils existent ──
+      - name: Node.js
+        if: steps.stack.outputs.node == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Node.js : installation
+        if: steps.stack.outputs.node == 'true'
+        run: |
+          corepack enable
+          case "${{ steps.stack.outputs.pm }}" in
+            pnpm) pnpm install --frozen-lockfile ;;
+            yarn) yarn install --frozen-lockfile ;;
+            *) if [ -f package-lock.json ]; then npm ci; else npm install; fi ;;
+          esac
+      - name: Node.js : lint, typecheck, tests, build
+        if: steps.stack.outputs.node == 'true'
+        run: |
+          for s in lint typecheck test build; do
+            if node -e "const c=require('./package.json').scripts?.['$s']; process.exit(c && !/no test specified/.test(c) ? 0 : 1)"; then
+              echo "::group::$s"
+              ${{ steps.stack.outputs.pm }} run "$s"
+              echo "::endgroup::"
+            fi
+          done
+
+      # ── Python : tests pytest ──
+      - name: Python
+        if: steps.stack.outputs.python == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python : installation et tests
+        if: steps.stack.outputs.python == 'true'
+        run: |
+          python -m pip install --upgrade pip pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install -e . || pip install .; fi
+          pytest || code=$?; if [ "${code:-0}" = "5" ]; then echo "Aucun test pytest trouvé."; exit 0; fi; exit ${code:-0}
+
+      # ── Go ──
+      - name: Go
+        if: steps.stack.outputs.go == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Go : vet et tests
+        if: steps.stack.outputs.go == 'true'
+        run: |
+          go vet ./...
+          go test ./...
+
+      # ── Rust ──
+      - name: Rust : tests
+        if: steps.stack.outputs.rust == 'true'
+        run: cargo test --all-features
+
+      - name: Rien à tester ?
+        if: steps.stack.outputs.node != 'true' && steps.stack.outputs.python != 'true' && steps.stack.outputs.go != 'true' && steps.stack.outputs.rust != 'true'
+        run: echo "::warning::Aucune pile reconnue (Node, Python, Go, Rust) : ajoute des tests pour que Cléa CI protège vraiment le code."
