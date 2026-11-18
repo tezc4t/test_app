@@ -44,7 +44,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Node.js : installation
+      - name: Node.js — installation
         if: steps.stack.outputs.node == 'true'
         run: |
           corepack enable
@@ -53,7 +53,7 @@ jobs:
             yarn) yarn install --frozen-lockfile ;;
             *) if [ -f package-lock.json ]; then npm ci; else npm install; fi ;;
           esac
-      - name: Node.js : lint, typecheck, tests, build
+      - name: Node.js — lint, typecheck, tests, build
         if: steps.stack.outputs.node == 'true'
         run: |
           for s in lint typecheck test build; do
@@ -70,7 +70,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Python : installation et tests
+      - name: Python — installation et tests
         if: steps.stack.outputs.python == 'true'
         run: |
           python -m pip install --upgrade pip pytest
@@ -83,17 +83,18 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Go : vet et tests
+      - name: Go — vet et tests
         if: steps.stack.outputs.go == 'true'
         run: |
           go vet ./...
           go test ./...
 
       # ── Rust ──
-      - name: Rust : tests
+      - name: Rust — tests
         if: steps.stack.outputs.rust == 'true'
         run: cargo test --all-features
 
       - name: Rien à tester ?
         if: steps.stack.outputs.node != 'true' && steps.stack.outputs.python != 'true' && steps.stack.outputs.go != 'true' && steps.stack.outputs.rust != 'true'
-        run: echo "::warning::Aucune pile reconnue (Node, Python, Go, Rust) : ajoute des tests pour que Cléa CI protège vraiment le code."
+        run: |
+          echo "::warning::Aucune pile reconnue (Node, Python, Go, Rust). Ajoute des tests pour que Cléa CI protège vraiment le code."
